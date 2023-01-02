@@ -27,7 +27,7 @@ struct pinctrl_function {
 };
 
 /* Max groups for one pin */
-#define MAX_PIN_GROUPS	U(13)
+#define MAX_PIN_GROUPS	(13U)
 
 struct zynqmp_pin_group {
 	uint16_t (*groups)[];
@@ -2037,7 +2037,7 @@ enum pm_ret_status pm_api_pinctrl_get_function_groups(uint32_t fid,
 {
 	uint16_t grps;
 	uint16_t end_of_grp_offset;
-	unsigned int i;
+	uint16_t i;
 
 	if (fid >= MAX_FUNCTION) {
 		return PM_RET_ERROR_ARGS;
@@ -2048,7 +2048,7 @@ enum pm_ret_status pm_api_pinctrl_get_function_groups(uint32_t fid,
 	grps = pinctrl_functions[fid].group_base;
 	end_of_grp_offset = grps + pinctrl_functions[fid].group_size;
 
-	for (i = 0; i < NUM_GROUPS_PER_RESP; i++) {
+	for (i = 0U; i < NUM_GROUPS_PER_RESP; i++) {
 		if ((grps + index + i) >= end_of_grp_offset) {
 			break;
 		}

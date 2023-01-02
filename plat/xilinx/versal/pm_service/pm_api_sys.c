@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2019-2022, Xilinx, Inc. All rights reserved.
+ * Copyright (c) 2022, Advanced Micro Devices, Inc. All rights reserved.
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
@@ -16,16 +17,6 @@
 #include "pm_client.h"
 #include "pm_defs.h"
 #include "pm_svc_main.h"
-#include "../drivers/arm/gic/v3/gicv3_private.h"
-
-/*********************************************************************
- * Target module IDs macros
- ********************************************************************/
-#define LIBPM_MODULE_ID		0x2U
-#define LOADER_MODULE_ID	0x7U
-
-#define  MODE	0x80000000U
-#define MODULE_ID_MASK		0x0000ff00
 
 /* default shutdown/reboot scope is system(2) */
 static uint32_t pm_shutdown_scope = XPM_SHUTDOWN_SUBTYPE_RST_SYSTEM;
@@ -38,38 +29,6 @@ static uint32_t pm_shutdown_scope = XPM_SHUTDOWN_SUBTYPE_RST_SYSTEM;
 uint32_t pm_get_shutdown_scope(void)
 {
 	return pm_shutdown_scope;
-}
-
-/**
- * Assigning of argument values into array elements.
- */
-#define PM_PACK_PAYLOAD1(pl, mid, flag, arg0) {	\
-	pl[0] = (uint32_t)(((uint32_t)(arg0) & 0xFFU) | ((mid) << 8U) | ((flag) << 24U)); \
-}
-
-#define PM_PACK_PAYLOAD2(pl, mid, flag, arg0, arg1) {		\
-	pl[1] = (uint32_t)(arg1);				\
-	PM_PACK_PAYLOAD1(pl, (mid), (flag), (arg0));			\
-}
-
-#define PM_PACK_PAYLOAD3(pl, mid, flag, arg0, arg1, arg2) {	\
-	pl[2] = (uint32_t)(arg2);				\
-	PM_PACK_PAYLOAD2(pl, (mid), (flag), (arg0), (arg1));		\
-}
-
-#define PM_PACK_PAYLOAD4(pl, mid, flag, arg0, arg1, arg2, arg3) {	\
-	pl[3] = (uint32_t)(arg3);					\
-	PM_PACK_PAYLOAD3(pl, (mid), (flag), (arg0), (arg1), (arg2));		\
-}
-
-#define PM_PACK_PAYLOAD5(pl, mid, flag, arg0, arg1, arg2, arg3, arg4) {	\
-	pl[4] = (uint32_t)(arg4);					\
-	PM_PACK_PAYLOAD4(pl, (mid), (flag), (arg0), (arg1), (arg2), (arg3));	\
-}
-
-#define PM_PACK_PAYLOAD6(pl, mid, flag, arg0, arg1, arg2, arg3, arg4, arg5) {	\
-	pl[5] = (uint32_t)(arg5);						\
-	PM_PACK_PAYLOAD5(pl, (mid), (flag), (arg0), (arg1), (arg2), (arg3), (arg4));		\
 }
 
 /* PM API functions */
@@ -90,7 +49,7 @@ enum pm_ret_status pm_handle_eemi_call(uint32_t flag, uint32_t x0, uint32_t x1,
 	uint32_t payload[PAYLOAD_ARG_CNT] = {0};
 	uint32_t module_id;
 
-	module_id = (x0 & MODULE_ID_MASK) >> 8;
+	module_id = (x0 & MODULE_ID_MASK) >> 8U;
 
 	//default module id is for LIBPM
 	if (module_id == 0) {
@@ -233,10 +192,12 @@ enum pm_ret_status pm_req_wakeup(uint32_t target, uint32_t set_address,
  * @data - array of PAYLOAD_ARG_CNT elements
  * @flag - 0 - Call from secure source
  *	   1 - Call from non-secure source
+ * @ack - 0 - Do not ack IPI after reading payload
+ *        1 - Ack IPI after reading payload
  *
  * Read value from ipi buffer response buffer.
  */
-void pm_get_callbackdata(uint32_t *data, size_t count, uint32_t flag)
+void pm_get_callbackdata(uint32_t *data, size_t count, uint32_t flag, uint32_t ack)
 {
 	/* Return if interrupt is not from PMU */
 	if (pm_ipi_irq_status(primary_proc) == 0) {
@@ -244,7 +205,10 @@ void pm_get_callbackdata(uint32_t *data, size_t count, uint32_t flag)
 	}
 
 	pm_ipi_buff_read_callb(data, count);
-	pm_ipi_irq_clear(primary_proc);
+
+	if (ack != 0U) {
+		pm_ipi_irq_clear(primary_proc);
+	}
 }
 
 /**
@@ -438,7 +402,7 @@ enum pm_ret_status pm_query_data(uint32_t qid, uint32_t arg1, uint32_t arg2,
 
 	ret = pm_feature_check(PM_QUERY_DATA, &version[0], flag);
 	if (ret == PM_RET_SUCCESS) {
-		fw_api_version = version[0] & 0xFFFF;
+		fw_api_version = version[0] & 0xFFFFU;
 		if ((fw_api_version == 2U) &&
 		    ((qid == XPM_QID_CLOCK_GET_NAME) ||
 		     (qid == XPM_QID_PINCTRL_GET_FUNCTION_NAME))) {
@@ -501,9 +465,7 @@ enum pm_ret_status pm_api_ioctl(uint32_t device_id, uint32_t ioctl_id,
 		if (ret != 0) {
 			return PM_RET_ERROR_ARGS;
 		}
-		gicd_write_irouter(gicv3_driver_data->gicd_base,
-				  (uint32_t)PLAT_VERSAL_IPI_IRQ, MODE);
-		ret =  PM_RET_SUCCESS;
+		ret = PM_RET_SUCCESS;
 		break;
 	default:
 		return PM_RET_ERROR_NOTSUPPORTED;
@@ -555,14 +517,14 @@ enum pm_ret_status pm_feature_check(uint32_t api_id, uint32_t *ret_payload,
 	case PM_GET_TRUSTZONE_VERSION:
 		ret_payload[0] = PM_API_VERSION_2;
 		return PM_RET_SUCCESS;
-	case PM_LOAD_PDI:
+	case TF_A_PM_REGISTER_SGI:
 		ret_payload[0] = PM_API_BASE_VERSION;
 		return PM_RET_SUCCESS;
 	default:
 		break;
 	}
 
-	module_id = (api_id & MODULE_ID_MASK) >> 8;
+	module_id = (api_id & MODULE_ID_MASK) >> 8U;
 
 	/*
 	 * feature check should be done only for LIBPM module

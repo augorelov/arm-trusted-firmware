@@ -159,7 +159,7 @@ void arm_setup_romlib(void);
 #define ARM_ROTPK_REGS_ID		1
 #define ARM_ROTPK_DEVEL_RSA_ID		2
 #define ARM_ROTPK_DEVEL_ECDSA_ID	3
-
+#define ARM_ROTPK_DEVEL_FULL_DEV_RSA_KEY_ID	4
 
 /* IO storage utility functions */
 int arm_io_setup(void);
@@ -297,6 +297,7 @@ void plat_arm_interconnect_exit_coherency(void);
 void plat_arm_program_trusted_mailbox(uintptr_t address);
 bool plat_arm_bl1_fwu_needed(void);
 __dead2 void plat_arm_error_handler(int err);
+__dead2 void plat_arm_system_reset(void);
 
 /*
  * Optional functions in ARM standard platforms

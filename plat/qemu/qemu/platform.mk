@@ -88,12 +88,12 @@ ifneq (${TRUSTED_BOARD_BOOT},0)
 
     $(ROT_KEY): | $(BUILD_PLAT)
 	@echo "  OPENSSL $@"
-	$(Q)openssl genrsa 2048 > $@ 2>/dev/null
+	$(Q)${OPENSSL_BIN_PATH}/openssl genrsa 2048 > $@ 2>/dev/null
 
     $(ROTPK_HASH): $(ROT_KEY)
 	@echo "  OPENSSL $@"
-	$(Q)openssl rsa -in $< -pubout -outform DER 2>/dev/null |\
-	openssl dgst -sha256 -binary > $@ 2>/dev/null
+	$(Q)${OPENSSL_BIN_PATH}/openssl rsa -in $< -pubout -outform DER 2>/dev/null |\
+	${OPENSSL_BIN_PATH}/openssl dgst -sha256 -binary > $@ 2>/dev/null
 endif
 
 # Include Measured Boot makefile before any Crypto library makefile.
@@ -109,7 +109,6 @@ ifeq (${MEASURED_BOOT},1)
     endif
 
     BL2_SOURCES		+=	plat/qemu/qemu/qemu_measured_boot.c	\
-				plat/qemu/qemu/qemu_common_measured_boot.c	\
 				plat/qemu/qemu/qemu_helpers.c		\
 				${EVENT_LOG_SOURCES}
 
@@ -162,7 +161,8 @@ BL2_SOURCES		+=	drivers/io/io_semihosting.c		\
 				${PLAT_QEMU_COMMON_PATH}/qemu_image_load.c		\
 				common/fdt_fixup.c					\
 				common/fdt_wrappers.c					\
-				common/desc_image_load.c
+				common/desc_image_load.c				\
+				common/uuid.c
 
 ifeq ($(add-lib-optee),yes)
 BL2_SOURCES		+=	lib/optee/optee_utils.c
@@ -211,8 +211,17 @@ BL31_SOURCES		+=	lib/cpus/aarch64/aem_generic.S		\
 				${PLAT_QEMU_COMMON_PATH}/qemu_bl31_setup.c		\
 				${QEMU_GIC_SOURCES}
 
+# Pointer Authentication sources
+ifeq (${ENABLE_PAUTH}, 1)
+PLAT_BL_COMMON_SOURCES	+=	plat/arm/common/aarch64/arm_pauth.c	\
+				lib/extensions/pauth/pauth_helpers.S
+endif
+
 ifeq (${SPD},spmd)
-BL31_SOURCES		+=	plat/qemu/common/qemu_spmd_manifest.c
+BL31_SOURCES		+=	plat/common/plat_spmd_manifest.c	\
+				common/uuid.c				\
+				${LIBFDT_SRCS} 				\
+				${FDT_WRAPPERS_SOURCES}
 endif
 endif
 
@@ -231,6 +240,20 @@ $(eval $(call TOOL_ADD_IMG,bl32_extra2,--tos-fw-extra2,,$(ENCRYPT_BL32)))
 else
 $(eval $(call TOOL_ADD_IMG,bl32_extra2,--tos-fw-extra2))
 endif
+endif
+
+ifneq ($(QEMU_TB_FW_CONFIG_DTS),)
+FDT_SOURCES		+=	${QEMU_TB_FW_CONFIG_DTS}
+QEMU_TB_FW_CONFIG	:=	${BUILD_PLAT}/fdts/$(notdir $(basename ${QEMU_TB_FW_CONFIG_DTS})).dtb
+# Add the TB_FW_CONFIG to FIP
+$(eval $(call TOOL_ADD_PAYLOAD,${QEMU_TB_FW_CONFIG},--tb-fw-config,${QEMU_TB_FW_CONFIG}))
+endif
+
+ifneq ($(QEMU_TOS_FW_CONFIG_DTS),)
+FDT_SOURCES		+=	${QEMU_TOS_FW_CONFIG_DTS}
+QEMU_TOS_FW_CONFIG	:=	${BUILD_PLAT}/fdts/$(notdir $(basename ${QEMU_TOS_FW_CONFIG_DTS})).dtb
+# Add the TOS_FW_CONFIG to FIP
+$(eval $(call TOOL_ADD_PAYLOAD,${QEMU_TOS_FW_CONFIG},--tos-fw-config,${QEMU_TOS_FW_CONFIG}))
 endif
 
 SEPARATE_CODE_AND_RODATA := 1
@@ -259,5 +282,8 @@ $(eval $(call add_define,ARM_LINUX_KERNEL_AS_BL33))
 ARM_PRELOADED_DTB_BASE := PLAT_QEMU_DT_BASE
 $(eval $(call add_define,ARM_PRELOADED_DTB_BASE))
 
-# Do not enable SVE
-ENABLE_SVE_FOR_NS	:=	0
+# Later QEMU versions support SME and SVE.
+ifneq (${ARCH},aarch32)
+	ENABLE_SVE_FOR_NS	:= 1
+	ENABLE_SME_FOR_NS	:= 1
+endif

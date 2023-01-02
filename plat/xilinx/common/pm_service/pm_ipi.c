@@ -1,5 +1,7 @@
 /*
  * Copyright (c) 2013-2020, ARM Limited and Contributors. All rights reserved.
+ * Copyright (c) 2019-2022, Xilinx, Inc. All rights reserved.
+ * Copyright (c) 2022, Advanced Micro Devices, Inc. All rights reserved.
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
@@ -13,9 +15,11 @@
 #include <plat_private.h>
 #include <plat/common/platform.h>
 
+#include "pm_defs.h"
 #include "pm_ipi.h"
 
-#define ERROR_CODE_MASK		0xFFFFU
+#define ERROR_CODE_MASK		(0xFFFFU)
+#define PM_OFFSET		(0U)
 
 DEFINE_BAKERY_LOCK(pm_secure_lock);
 
@@ -30,12 +34,10 @@ DEFINE_BAKERY_LOCK(pm_secure_lock);
  *
  * Called from pm_setup initialization function
  */
-int32_t pm_ipi_init(const struct pm_proc *proc)
+void pm_ipi_init(const struct pm_proc *proc)
 {
 	bakery_lock_init(&pm_secure_lock);
 	ipi_mb_open(proc->ipi->local_ipi_id, proc->ipi->remote_ipi_id);
-
-	return 0;
 }
 
 /**
@@ -52,7 +54,7 @@ static enum pm_ret_status pm_ipi_send_common(const struct pm_proc *proc,
 					     uint32_t payload[PAYLOAD_ARG_CNT],
 					     uint32_t is_blocking)
 {
-	unsigned int offset = 0;
+	uint32_t offset = PM_OFFSET;
 	uintptr_t buffer_base = proc->ipi->buffer_base +
 					IPI_BUFFER_TARGET_REMOTE_OFFSET +
 					IPI_BUFFER_REQ_OFFSET;
@@ -182,7 +184,7 @@ void pm_ipi_buff_read_callb(uint32_t *value, size_t count)
 	size_t i;
 #if IPI_CRC_CHECK
 	size_t j;
-	unsigned int response_payload[PAYLOAD_ARG_CNT];
+	unsigned int response_payload[PAYLOAD_ARG_CNT] = {0};
 #endif
 	uintptr_t buffer_base = IPI_BUFFER_REMOTE_BASE +
 				IPI_BUFFER_TARGET_LOCAL_OFFSET +

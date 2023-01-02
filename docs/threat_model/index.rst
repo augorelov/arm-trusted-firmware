@@ -11,12 +11,13 @@ based on the data flow diagram and potential threat mitigations.
 .. toctree::
    :maxdepth: 1
    :caption: Contents
-   :numbered:
 
    threat_model
    threat_model_spm
+   threat_model_el3_spm
    threat_model_fvp_r
+   threat_model_rss_interface
 
 --------------
 
-*Copyright (c) 2021, Arm Limited and Contributors. All rights reserved.*
+*Copyright (c) 2021-2022, Arm Limited and Contributors. All rights reserved.*

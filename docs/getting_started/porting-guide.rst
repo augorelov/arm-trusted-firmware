@@ -23,8 +23,8 @@ Some modifications are common to all Boot Loader (BL) stages. Section 2
 discusses these in detail. The subsequent sections discuss the remaining
 modifications for each BL stage in detail.
 
-Please refer to the :ref:`Platform Compatibility Policy` for the policy
-regarding compatibility and deprecation of these porting interfaces.
+Please refer to the :ref:`Platform Ports Policy` for the policy regarding
+compatibility and deprecation of these porting interfaces.
 
 Only Arm development platforms (such as FVP and Juno) may use the
 functions/definitions in ``include/plat/arm/common/`` and the corresponding
@@ -120,7 +120,7 @@ likely to be suitable for all platform ports.
 
 -  **#define : CACHE_WRITEBACK_GRANULE**
 
-   Defines the size in bits of the largest cache line across all the cache
+   Defines the size in bytes of the largest cache line across all the cache
    levels in the platform.
 
 -  **#define : FIRMWARE_WELCOME_STR**
@@ -241,6 +241,11 @@ likely to be suitable for all platform ports.
 -  **#define : BL31_LIMIT**
 
    Defines the maximum address in secure RAM that the BL31 image can occupy.
+
+-  **#define : PLAT_RSS_COMMS_PAYLOAD_MAX_SIZE**
+
+   Defines the maximum message size between AP and RSS. Need to define if
+   platform supports RSS.
 
 For every image, the platform must define individual identifiers that will be
 used by BL1 or BL2 to load the corresponding image into memory from non-volatile
@@ -564,6 +569,21 @@ behaviour of the ``assert()`` function (for example, to save memory).
    doesn't print anything to the console. If ``PLAT_LOG_LEVEL_ASSERT`` isn't
    defined, it defaults to ``LOG_LEVEL``.
 
+If the platform port uses the DRTM feature, the following constants must be
+defined:
+
+-  **#define : PLAT_DRTM_EVENT_LOG_MAX_SIZE**
+
+   Maximum Event Log size used by the platform. Platform can decide the maximum
+   size of the Event Log buffer, depending upon the highest hash algorithm
+   chosen and the number of components selected to measure during the DRTM
+   execution flow.
+
+-  **#define : PLAT_DRTM_MMAP_ENTRIES**
+
+   Number of the MMAP entries used by the DRTM implementation to calculate the
+   size of address map region of the platform.
+
 File : plat_macros.S [mandatory]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -788,6 +808,214 @@ be written to the NV counter.
 The function returns 0 on success. Any other value means the counter value
 either could not be updated or the authentication image descriptor indicates
 that it is not allowed to be updated.
+
+Function: plat_convert_pk()
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+::
+
+    Argument : void *, unsigned int, void **, unsigned int *
+    Return   : int
+
+This function is optional when Trusted Board Boot is enabled, and only
+used if the platform saves a hash of the ROTPK.
+First argument is the Distinguished Encoding Rules (DER) ROTPK.
+Second argument is its size.
+Third argument is used to return a pointer to a buffer, which hash should
+be the one saved in OTP.
+Fourth argument is a pointer to return its size.
+
+Most platforms save the hash of the ROTPK, but some may save slightly different
+information - e.g the hash of the ROTPK plus some related information.
+Defining this function allows to transform the ROTPK used to verify
+the signature to the buffer (a platform specific public key) which
+hash is saved in OTP.
+
+The default implementation copies the input key and length to the output without
+modification.
+
+The function returns 0 on success. Any other value means the expected
+public key buffer cannot be extracted.
+
+Dynamic Root of Trust for Measurement support (in BL31)
+-------------------------------------------------------
+
+The functions mentioned in this section are mandatory, when platform enables
+DRTM_SUPPORT build flag.
+
+Function : plat_get_addr_mmap()
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+::
+
+    Argument : void
+    Return   : const mmap_region_t *
+
+This function is used to return the address of the platform *address-map* table,
+which describes the regions of normal memory, memory mapped I/O
+and non-volatile memory.
+
+Function : plat_has_non_host_platforms()
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+::
+
+    Argument : void
+    Return   : bool
+
+This function returns *true* if the platform has any trusted devices capable of
+DMA, otherwise returns *false*.
+
+Function : plat_has_unmanaged_dma_peripherals()
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+::
+
+    Argument : void
+    Return   : bool
+
+This function returns *true* if platform uses peripherals whose DMA is not
+managed by an SMMU, otherwise returns *false*.
+
+Note -
+If the platform has peripherals that are not managed by the SMMU, then the
+platform should investigate such peripherals to determine whether they can
+be trusted, and such peripherals should be moved under "Non-host platforms"
+if they can be trusted.
+
+Function : plat_get_total_num_smmus()
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+::
+
+    Argument : void
+    Return   : unsigned int
+
+This function returns the total number of SMMUs in the platform.
+
+Function : plat_enumerate_smmus()
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+::
+
+
+    Argument : void
+    Return   : const uintptr_t *, size_t
+
+This function returns an array of SMMU addresses and the actual number of SMMUs
+reported by the platform.
+
+Function : plat_drtm_get_dma_prot_features()
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+::
+
+    Argument : void
+    Return   : const plat_drtm_dma_prot_features_t*
+
+This function returns the address of plat_drtm_dma_prot_features_t structure
+containing the maximum number of protected regions and bitmap with the types
+of DMA protection supported by the platform.
+For more details see section 3.3 Table 6 of `DRTM`_ specification.
+
+Function : plat_drtm_dma_prot_get_max_table_bytes()
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+::
+
+    Argument : void
+    Return   : uint64_t
+
+This function returns the maximum size of DMA protected regions table in
+bytes.
+
+Function : plat_drtm_get_tpm_features()
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+::
+
+    Argument : void
+    Return   : const plat_drtm_tpm_features_t*
+
+This function returns the address of *plat_drtm_tpm_features_t* structure
+containing PCR usage schema, TPM-based hash, and firmware hash algorithm
+supported by the platform.
+
+Function : plat_drtm_get_min_size_normal_world_dce()
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+::
+
+    Argument : void
+    Return   : uint64_t
+
+This function returns the size normal-world DCE of the platform.
+
+Function : plat_drtm_get_imp_def_dlme_region_size()
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+::
+
+    Argument : void
+    Return   : uint64_t
+
+This function returns the size of implementation defined DLME region
+of the platform.
+
+Function : plat_drtm_get_tcb_hash_table_size()
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+::
+
+    Argument : void
+    Return   : uint64_t
+
+This function returns the size of TCB hash table of the platform.
+
+Function : plat_drtm_get_tcb_hash_features()
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+::
+
+    Argument : void
+    Return   : uint64_t
+
+This function returns the Maximum number of TCB hashes recorded by the
+platform.
+For more details see section 3.3 Table 6 of `DRTM`_ specification.
+
+Function : plat_drtm_validate_ns_region()
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+::
+
+    Argument : uintptr_t, uintptr_t
+    Return   : int
+
+This function validates that given region is within the Non-Secure region
+of DRAM. This function takes a region start address and size an input
+arguments, and returns 0 on success and -1 on failure.
+
+Function : plat_set_drtm_error()
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+::
+
+    Argument : uint64_t
+    Return   : int
+
+This function writes a 64 bit error code received as input into
+non-volatile storage and returns 0 on success and -1 on failure.
+
+Function : plat_get_drtm_error()
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+::
+
+    Argument : uint64_t*
+    Return   : int
+
+This function reads a 64 bit error code from the non-volatile storage
+into the received address, and returns 0 on success and -1 on failure.
 
 Common mandatory function modifications
 ---------------------------------------
@@ -1097,6 +1325,20 @@ environment is initialized.
    The address from where it was called is stored in x30 (Link Register).
    The default implementation simply spins.
 
+Function : plat_system_reset()
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+::
+
+    Argument : void
+    Return   : void
+
+This function is used by the platform to resets the system. It can be used
+in any specific use-case where system needs to be resetted. For example,
+in case of DRTM implementation this function reset the system after
+writing the DRTM error code in the non-volatile storage. This function
+never returns. Failure in reset results in panic.
+
 Function : plat_get_bl_image_load_info()
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -1246,6 +1488,22 @@ When the MEASURED_BOOT flag is enabled:
    otherwise.
 
 When the MEASURED_BOOT flag is disabled, this function doesn't do anything.
+
+Function : plat_can_cmo()
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+::
+
+    Argument : void
+    Return   : uint64_t
+
+When CONDITIONAL_CMO flag is enabled:
+
+- This function indicates whether cache management operations should be
+  performed. It returns 0 if CMOs should be skipped and non-zero
+  otherwise.
+- The function must not clobber x1, x2 and x3. It's also not safe to rely on
+  stack. Otherwise obey AAPCS.
 
 Modifications specific to a Boot Loader stage
 ---------------------------------------------
@@ -1665,6 +1923,42 @@ element in the boot sequence. If there are no more boot sources then it
 must return 0, otherwise it must return 1. The default implementation
 of this always returns 0.
 
+Function : bl2_plat_mboot_init() [optional]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+::
+
+    Argument : void
+    Return   : void
+
+When the MEASURED_BOOT flag is enabled:
+
+-  This function is used to initialize the backend driver(s) of measured boot.
+-  On the Arm FVP port, this function is used to initialize the Event Log
+   backend driver with the Event Log buffer information (base address and
+   size) received from BL1. It results in panic on error.
+
+When the MEASURED_BOOT flag is disabled, this function doesn't do anything.
+
+Function : bl2_plat_mboot_finish() [optional]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+::
+
+    Argument : void
+    Return   : void
+
+When the MEASURED_BOOT flag is enabled:
+
+-  This function is used to finalize the measured boot backend driver(s),
+   and also, set the information for the next bootloader component to extend
+   the measurement if needed.
+-  On the Arm FVP port, this function is used to pass the Event Log buffer
+   information (base address and size) to non-secure(BL33) and trusted OS(BL32)
+   via nt_fw and tos_fw config respectively. It results in panic on error.
+
+When the MEASURED_BOOT flag is disabled, this function doesn't do anything.
+
 Boot Loader Stage 2 (BL2) at EL3
 --------------------------------
 
@@ -1821,42 +2115,6 @@ Application Processor (AP) for BL2U execution to continue.
 
 This function returns 0 on success, a negative error code otherwise.
 This function is included if SCP_BL2U_BASE is defined.
-
-Function : bl2_plat_mboot_init() [optional]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-::
-
-    Argument : void
-    Return   : void
-
-When the MEASURED_BOOT flag is enabled:
-
--  This function is used to initialize the backend driver(s) of measured boot.
--  On the Arm FVP port, this function is used to initialize the Event Log
-   backend driver with the Event Log buffer information (base address and
-   size) received from BL1. It results in panic on error.
-
-When the MEASURED_BOOT flag is disabled, this function doesn't do anything.
-
-Function : bl2_plat_mboot_finish() [optional]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-::
-
-    Argument : void
-    Return   : void
-
-When the MEASURED_BOOT flag is enabled:
-
--  This function is used to finalize the measured boot backend driver(s),
-   and also, set the information for the next bootloader component to extend
-   the measurement if needed.
--  On the Arm FVP port, this function is used to pass the Event Log buffer
-   information (base address and size) to non-secure(BL33) and trusted OS(BL32)
-   via nt_fw and tos_fw config respectively. It results in panic on error.
-
-When the MEASURED_BOOT flag is disabled, this function doesn't do anything.
 
 Boot Loader Stage 3-1 (BL31)
 ----------------------------
@@ -2254,7 +2512,7 @@ value: uuid_t plat_trng_uuid [mandatory]
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 This value must be defined to the UUID of the TRNG backend that is specific to
-the hardware after ``plat_trng_setup`` function is called. This value must
+the hardware after ``plat_entropy_setup`` function is called. This value must
 conform to the SMCCC calling convention; The most significant 32 bits of the
 UUID must not equal ``0xffffffff`` or the signed integer ``-1`` as this value in
 w0 indicates failure to get a TRNG source.
@@ -2555,7 +2813,8 @@ must ensure that races between multiple CPUs cannot occur.
 The ``target_state`` has a similar meaning as described in the ``pwr_domain_off()``
 operation and it encodes the platform coordinated target local power states for
 the CPU power domain and its parent power domain levels. This function must
-not return back to the caller.
+not return back to the caller (by calling wfi in an infinite loop to ensure
+some CPUs power down mitigations work properly).
 
 If this function is not implemented by the platform, PSCI generic
 implementation invokes ``psci_power_down_wfi()`` for power down.
@@ -2941,6 +3200,34 @@ Register* (``GICD_IGROUPRn``) and *Interrupt Group Modifier Register*
 (``GICD_IGRPMODRn``) is read to figure out whether the interrupt is configured
 as Group 0 secure interrupt, Group 1 secure interrupt or Group 1 NS interrupt.
 
+Common helper functions
+-----------------------
+
+Function : do_panic()
+~~~~~~~~~~~~~~~~~~~~~
+
+::
+
+    Argument : void
+    Return   : void
+
+This API is called from assembly files when encountering a critical failure that
+cannot be recovered from. It also invokes elx_panic() which allows to report a
+crash from lower exception level. This function assumes that it is invoked from
+a C runtime environment i.e. valid stack exists. This call **must not** return.
+
+Function : panic()
+~~~~~~~~~~~~~~~~~~
+
+::
+
+    Argument : void
+    Return   : void
+
+This API called from C files when encountering a critical failure that cannot
+be recovered from. This function in turn prints backtrace (if enabled) and calls
+do_panic(). This call **must not** return.
+
 Crash Reporting mechanism (in BL31)
 -----------------------------------
 
@@ -3225,3 +3512,4 @@ amount of open resources per driver.
 .. _3.0 (GICv3): http://infocenter.arm.com/help/topic/com.arm.doc.ihi0069b/index.html
 .. _FreeBSD: https://www.freebsd.org
 .. _SCC: http://www.simple-cc.org/
+.. _DRTM: https://developer.arm.com/documentation/den0113/a

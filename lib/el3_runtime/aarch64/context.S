@@ -788,6 +788,15 @@ endfunc fpregs_context_restore
 #endif /* CTX_INCLUDE_FPREGS */
 
 	/*
+	 * Set SCR_EL3.EA bit to enable SErrors at EL3
+	 */
+	.macro enable_serror_at_el3
+	mrs     x8, scr_el3
+	orr     x8, x8, #SCR_EA_BIT
+	msr     scr_el3, x8
+	.endm
+
+	/*
 	 * Set the PSTATE bits not set when the exception was taken as
 	 * described in the AArch64.TakeException() pseudocode function
 	 * in ARM DDI 0487F.c page J1-7635 to a default value.
@@ -806,9 +815,9 @@ endfunc fpregs_context_restore
 /* ------------------------------------------------------------------
  * The following macro is used to save and restore all the general
  * purpose and ARMv8.3-PAuth (if enabled) registers.
- * It also checks if Secure Cycle Counter is not disabled in MDCR_EL3
- * when ARMv8.5-PMU is implemented, and if called from Non-secure
- * state saves PMCR_EL0 and disables Cycle Counter.
+ * It also checks if the Secure Cycle Counter (PMCCNTR_EL0)
+ * is disabled in EL3/Secure (ARMv8.5-PMU), wherein PMCCNTR_EL0
+ * needs not to be saved/restored during world switch.
  *
  * Ideally we would only save and restore the callee saved registers
  * when a world switch occurs but that type of implementation is more
@@ -837,9 +846,17 @@ endfunc fpregs_context_restore
 	str	x18, [sp, #CTX_GPREGS_OFFSET + CTX_GPREG_SP_EL0]
 
 	/* ----------------------------------------------------------
-	 * Check if earlier initialization MDCR_EL3.SCCD/MCCD to 1
-	 * failed, meaning that FEAT_PMUv3p5/7 is not implemented and
-	 * PMCR_EL0 should be saved in non-secure context.
+	 * Check if earlier initialization of MDCR_EL3.SCCD/MCCD to 1
+	 * has failed.
+	 *
+	 * MDCR_EL3:
+	 * MCCD bit set, Prohibits the Cycle Counter PMCCNTR_EL0 from
+	 * counting at EL3.
+	 * SCCD bit set, Secure Cycle Counter Disable. Prohibits PMCCNTR_EL0
+	 * from counting in Secure state.
+	 * If these bits are not set, meaning that FEAT_PMUv3p5/7 is
+	 * not implemented and PMCR_EL0 should be saved in non-secure
+	 * context.
 	 * ----------------------------------------------------------
 	 */
 	mov_imm	x10, (MDCR_SCCD_BIT | MDCR_MCCD_BIT)
@@ -847,7 +864,13 @@ endfunc fpregs_context_restore
 	tst	x9, x10
 	bne	1f
 
-	/* Secure Cycle Counter is not disabled */
+	/* ----------------------------------------------------------
+	 * If control reaches here, it ensures the Secure Cycle
+	 * Counter (PMCCNTR_EL0) is not prohibited from counting at
+	 * EL3 and in secure states.
+	 * Henceforth, PMCR_EL0 to be saved before world switch.
+	 * ----------------------------------------------------------
+	 */
 	mrs	x9, pmcr_el0
 
 	/* Check caller's security state */
@@ -903,6 +926,7 @@ endfunc fpregs_context_restore
  */
 func prepare_el3_entry
 	save_gp_pmcr_pauth_regs
+	enable_serror_at_el3
 	/*
 	 * Set the PSTATE bits not described in the Aarch64.TakeException
 	 * pseudocode to their default values.
@@ -1050,16 +1074,6 @@ func el3_exit
 	msr	spsel, #MODE_SP_ELX
 	str	x17, [sp, #CTX_EL3STATE_OFFSET + CTX_RUNTIME_SP]
 
-	/* ----------------------------------------------------------
-	 * Restore SPSR_EL3, ELR_EL3 and SCR_EL3 prior to ERET
-	 * ----------------------------------------------------------
-	 */
-	ldr	x18, [sp, #CTX_EL3STATE_OFFSET + CTX_SCR_EL3]
-	ldp	x16, x17, [sp, #CTX_EL3STATE_OFFSET + CTX_SPSR_EL3]
-	msr	scr_el3, x18
-	msr	spsr_el3, x16
-	msr	elr_el3, x17
-
 #if IMAGE_BL31
 	/* ----------------------------------------------------------
 	 * Restore CPTR_EL3.
@@ -1089,17 +1103,6 @@ sve_not_enabled:
 1:
 #endif /* IMAGE_BL31 && DYNAMIC_WORKAROUND_CVE_2018_3639 */
 
-	restore_ptw_el1_sys_regs
-
-	/* ----------------------------------------------------------
-	 * Restore general purpose (including x30), PMCR_EL0 and
-	 * ARMv8.3-PAuth registers.
-	 * Exit EL3 via ERET to a lower exception level.
- 	 * ----------------------------------------------------------
- 	 */
-	bl	restore_gp_pmcr_pauth_regs
-	ldr	x30, [sp, #CTX_GPREGS_OFFSET + CTX_GPREG_LR]
-
 #if IMAGE_BL31 && RAS_EXTENSION
 	/* ----------------------------------------------------------
 	 * Issue Error Synchronization Barrier to synchronize SErrors
@@ -1112,6 +1115,27 @@ sve_not_enabled:
 #else
 	dsb	sy
 #endif /* IMAGE_BL31 && RAS_EXTENSION */
+
+	/* ----------------------------------------------------------
+	 * Restore SPSR_EL3, ELR_EL3 and SCR_EL3 prior to ERET
+	 * ----------------------------------------------------------
+	 */
+	ldr	x18, [sp, #CTX_EL3STATE_OFFSET + CTX_SCR_EL3]
+	ldp	x16, x17, [sp, #CTX_EL3STATE_OFFSET + CTX_SPSR_EL3]
+	msr	scr_el3, x18
+	msr	spsr_el3, x16
+	msr	elr_el3, x17
+
+	restore_ptw_el1_sys_regs
+
+	/* ----------------------------------------------------------
+	 * Restore general purpose (including x30), PMCR_EL0 and
+	 * ARMv8.3-PAuth registers.
+	 * Exit EL3 via ERET to a lower exception level.
+ 	 * ----------------------------------------------------------
+ 	 */
+	bl	restore_gp_pmcr_pauth_regs
+	ldr	x30, [sp, #CTX_GPREGS_OFFSET + CTX_GPREG_LR]
 
 #ifdef IMAGE_BL31
 	str	xzr, [sp, #CTX_EL3STATE_OFFSET + CTX_IS_IN_EL3]

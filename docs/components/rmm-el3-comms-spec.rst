@@ -101,7 +101,7 @@ During cold boot RMM expects the following register values:
    x2,Maximum number of CPUs to be supported at runtime. RMM should ensure that it can support this maximum number.
    x3,Base address for the shared buffer used for communication between EL3 firmware and RMM. This buffer must be of 4KB size (1 page). The boot manifest must be present at the base of this shared buffer during cold boot.
 
-During cold boot, EL3 firmware needs to allocate a 4K page that will be
+During cold boot, EL3 firmware needs to allocate a 4KB page that will be
 passed to RMM in x3. This memory will be used as shared buffer for communication
 between EL3 and RMM. It must be assigned to Realm world and must be mapped with
 Normal memory attributes (IWB-OWB-ISH) at EL3. At boot, this memory will be
@@ -200,7 +200,7 @@ For the type specification of the RMM Boot Manifest v0.1, refer to
 
 .. _runtime_services_and_interface:
 
-RMMM-EL3 Runtime Interface
+RMM-EL3 Runtime Interface
 __________________________
 
 This section defines the RMM-EL3 runtime interface which specifies the ABI for
@@ -247,8 +247,132 @@ implemented by EL3 Firmware.
    :header: "FID", "Command"
    :widths: 2 5
 
+   0xC400018F,``RMM_RMI_REQ_COMPLETE``
+   0xC40001B0,``RMM_GTSI_DELEGATE``
+   0xC40001B1,``RMM_GTSI_UNDELEGATE``
    0xC40001B2,``RMM_ATTEST_GET_REALM_KEY``
    0xC40001B3,``RMM_ATTEST_GET_PLAT_TOKEN``
+
+RMM_RMI_REQ_COMPLETE command
+============================
+
+Notifies the completion of an RMI call to the Non-Secure world.
+
+This call is the only function currently in RMM-EL3 runtime interface which
+results in a world switch to NS. This call is the reply to the original RMI
+call and it is forwarded by EL3 to the NS world.
+
+FID
+---
+
+``0xC400018F``
+
+Input values
+------------
+
+.. csv-table::
+   :header: "Name", "Register", "Field", "Type", "Description"
+   :widths: 1 1 1 1 5
+
+   fid,x0,[63:0],UInt64,Command FID
+   err_code,x1,[63:0],RmiCommandReturnCode,Error code returned by the RMI service invoked by NS World. See Realm Management Monitor specification for more info
+
+Output values
+-------------
+
+This call does not return.
+
+Failure conditions
+------------------
+
+Since this call does not return to RMM, there is no failure condition which
+can be notified back to RMM.
+
+RMM_GTSI_DELEGATE command
+=========================
+
+Delegate a memory granule by changing its PAS from Non-Secure to Realm.
+
+FID
+---
+
+``0xC40001B0``
+
+Input values
+------------
+
+.. csv-table::
+   :header: "Name", "Register", "Field", "Type", "Description"
+   :widths: 1 1 1 1 5
+
+   fid,x0,[63:0],UInt64,Command FID
+   base_pa,x1,[63:0],Address,PA of the start of the granule to be delegated
+
+Output values
+-------------
+
+.. csv-table::
+   :header: "Name", "Register", "Field", "Type", "Description"
+   :widths: 1 1 1 2 4
+
+   Result,x0,[63:0],Error Code,Command return status
+
+Failure conditions
+------------------
+
+The table below shows all the possible error codes returned in ``Result`` upon
+a failure. The errors are ordered by condition check.
+
+.. csv-table::
+   :header: "ID", "Condition"
+   :widths: 1 5
+
+   ``E_RMM_BAD_ADDR``,``PA`` does not correspond to a valid granule address
+   ``E_RMM_BAD_PAS``,The granule pointed by ``PA`` does not belong to Non-Secure PAS
+   ``E_RMM_OK``,No errors detected
+
+RMM_GTSI_UNDELEGATE command
+===========================
+
+Undelegate a memory granule by changing its PAS from Realm to Non-Secure.
+
+FID
+---
+
+``0xC40001B1``
+
+Input values
+------------
+
+.. csv-table::
+   :header: "Name", "Register", "Field", "Type", "Description"
+   :widths: 1 1 1 1 5
+
+   fid,x0,[63:0],UInt64,Command FID
+   base_pa,x1,[63:0],Address,PA of the start of the granule to be undelegated
+
+Output values
+-------------
+
+.. csv-table::
+   :header: "Name", "Register", "Field", "Type", "Description"
+   :widths: 1 1 1 2 4
+
+   Result,x0,[63:0],Error Code,Command return status
+
+Failure conditions
+------------------
+
+The table below shows all the possible error codes returned in ``Result`` upon
+a failure. The errors are ordered by condition check.
+
+.. csv-table::
+   :header: "ID", "Condition"
+   :widths: 1 5
+
+   ``E_RMM_BAD_ADDR``,``PA`` does not correspond to a valid granule address
+   ``E_RMM_BAD_PAS``,The granule pointed by ``PA`` does not belong to Realm PAS
+   ``E_RMM_OK``,No errors detected
 
 RMM_ATTEST_GET_REALM_KEY command
 ================================
@@ -370,8 +494,11 @@ EL3 must maintain a separate register context for the following:
    #. General purpose registers (x0-x30) and ``sp_el0``, ``sp_el2`` stack pointers
    #. EL2 system register context for all enabled features by EL3. These include system registers with the ``_EL2`` prefix. The EL2 physical and virtual timer registers must not be included in this.
 
-It is the responsibility of EL3 that the above registers will not be leaked to
-the NS Host and to maintain the confidentiality of the Realm World.
+As part of SMC forwarding between the NS world and Realm world, EL3 allows x0-x7 to be passed
+as arguments to Realm and x0-x4 to be used for return arguments back to Non Secure.
+As per SMCCCv1.2, x4 must be preserved if not being used as return argument by the SMC function
+and it is the responsibility of RMM to preserve this or use this as a return argument.
+EL3 will always copy x0-x4 from Realm context to NS Context.
 
 EL3 will not save some registers as mentioned in the below list. It is the
 responsibility of RMM to ensure that these are appropriately saved if the
@@ -381,6 +508,9 @@ Realm World makes use of them:
    #. SVE registers
    #. SME registers
    #. EL1/0 registers
+
+It is the responsibility of EL3 that any other registers other than the ones mentioned above
+will not be leaked to the NS Host and to maintain the confidentiality of the Realm World.
 
 SMCCC v1.3 allows NS world to specify whether SVE context is in use. In this
 case, RMM could choose to not save the incoming SVE context but must ensure
@@ -392,8 +522,8 @@ _____
 
 .. _rmm_el3_manifest_struct:
 
-RMM-EL3 Boot Manifest Version
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+RMM-EL3 Boot Manifest structure
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The RMM-EL3 Boot Manifest structure contains platform boot information passed
 from EL3 to RMM. The width of the Boot Manifest is 128 bits
